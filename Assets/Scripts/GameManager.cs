@@ -4,6 +4,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using TMPro;
+using UnityEngine.Serialization;
+using UnityEngine.InputSystem;
 
 public class GameManager : MonoBehaviour
 {
@@ -15,6 +17,13 @@ public class GameManager : MonoBehaviour
     public TextMeshProUGUI txtScore;
     public TextMeshProUGUI txtMatches;
     public TextMeshProUGUI txtTurns;
+    
+    public GameObject pauseMenu;
+    public Button btnResume;
+    public Button btnRestart;
+    [FormerlySerializedAs("btn3x3")] public Button btn3x4;
+    public Button btn4x4;
+    [FormerlySerializedAs("btn5x5")] public Button btn5x6;
 
     private List<Card> cards = new List<Card>();
     private List<Card> flippedCards = new List<Card>();
@@ -26,102 +35,134 @@ public class GameManager : MonoBehaviour
     private int score = 0;
     private int totalPairs;
 
+    private bool isPaused = false;
+
     private AudioSource audioSource;
     public AudioClip flipSound, matchSound, mismatchSound, gameOverSound;
 
     private const string SAVE_KEY = "CardMatchSave";
     
-    private const float CARD_ASPECT_RATIO = 1.4f;   // real playing-card shape
+    private const float CARD_ASPECT_RATIO = 1.4f;
 
     private void Awake()
     {
         audioSource = GetComponent<AudioSource>();
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+        
+        if (btnResume)   btnResume.onClick.AddListener(ResumeGame);
+        if (btnRestart)  btnRestart.onClick.AddListener(() => NewGame(rows, cols));
+        if (btn3x4)      btn3x4.onClick.AddListener(() => NewGame(3, 4));
+        if (btn4x4)      btn4x4.onClick.AddListener(() => NewGame(4, 4));
+        if (btn5x6)      btn5x6.onClick.AddListener(() => NewGame(5, 6));
     }
 
     private void Start()
     {
+        if (pauseMenu) pauseMenu.SetActive(false);
         LoadProgress();
         if (cards.Count == 0)
         {
-            GenerateBoard(4, 4);
+            NewGame(4, 4);
         }
         UpdateUI();
     }
 
-    private void OnApplicationQuit()
+    private void Update()
     {
+        if (Keyboard.current.escapeKey.wasPressedThisFrame)
+        {
+            TogglePause();
+        }
+    }
+
+    public void TogglePause()
+    {
+        isPaused = !isPaused;
+        if (pauseMenu) pauseMenu.SetActive(isPaused);
+    }
+
+    private void ResumeGame()
+    {
+        isPaused = false;
+        if (pauseMenu) pauseMenu.SetActive(false);
+    }
+
+    public void NewGame(int r, int c)
+    {
+        rows = r;
+        cols = c;
+        GenerateBoard(r, c);
+        ResumeGame();
         SaveProgress();
     }
 
-    // ====================================================================
-    // UPDATED: Cards now fill almost the ENTIRE SCREEN with equal spacing
-    // ====================================================================
     public void GenerateBoard(int r, int c)
-{
-    rows = r;
-    cols = c;
-    ClearBoard();
-
-    // Force board to use 100% of the screen
-    RectTransform boardRT = boardParent.GetComponent<RectTransform>();
-    boardRT.anchorMin = Vector2.zero;
-    boardRT.anchorMax = Vector2.one;
-    boardRT.anchoredPosition = Vector2.zero;
-    boardRT.sizeDelta = Vector2.zero;
-
-    // Minimal padding/spacing so cards are HUGE
-    gridLayout.padding = new RectOffset(10, 10, 95, 15);  // top padding only for your Score bar
-    gridLayout.spacing = new Vector2(6, 6);
-    gridLayout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
-    gridLayout.constraintCount = c;
-
-    // Create the cards
-    List<int> ids = Enumerable.Range(0, (r * c) / 2).ToList();
-    ids.AddRange(ids);
-    ids = ids.OrderBy(x => Random.value).ToList();
-
-    for (int i = 0; i < r * c; i++)
     {
-        GameObject go = Instantiate(cardPrefab, boardParent);
-        Card card = go.GetComponent<Card>();
-        card.id = ids[i];
-        card.frontSprite = GetSpriteForId(card.id);
-        card.backSprite = GetBackSprite();
-        cards.Add(card);
+        rows = r;
+        cols = c;
+        ClearBoard();
 
-        Button btn = go.GetComponent<Button>();
-        btn.onClick.AddListener(() => OnCardClicked(card));
+        RectTransform boardRT = boardParent.GetComponent<RectTransform>();
+        
+        boardRT.anchorMin = new Vector2(0.20f, 0f);
+        boardRT.anchorMax = Vector2.one;
+        boardRT.anchoredPosition = Vector2.zero;
+        boardRT.sizeDelta = Vector2.zero;
+        
+        gridLayout.padding = new RectOffset(20, 20, 50, 50);
+        
+        gridLayout.childAlignment = TextAnchor.MiddleCenter;
+
+        gridLayout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+        gridLayout.constraintCount = c;
+        
+        float dynamicSpacingX = Mathf.Max(12f, Screen.width  * 0.045f);
+        float dynamicSpacingY = Mathf.Max(12f, Screen.height * 0.045f);
+        gridLayout.spacing = new Vector2(dynamicSpacingX, dynamicSpacingY);
+        
+        List<int> ids = Enumerable.Range(0, (r * c) / 2).ToList();
+        ids.AddRange(ids);
+        ids = ids.OrderBy(x => Random.value).ToList();
+
+        for (int i = 0; i < r * c; i++)
+        {
+            GameObject go = Instantiate(cardPrefab, boardParent);
+            Card card = go.GetComponent<Card>();
+            card.id = ids[i];
+            card.frontSprite = GetSpriteForId(card.id);
+            card.backSprite = GetBackSprite();
+            cards.Add(card);
+
+            Button btn = go.GetComponent<Button>();
+            btn.onClick.AddListener(() => OnCardClicked(card));
+        }
+        
+        LayoutRebuilder.ForceRebuildLayoutImmediate(boardRT);
+        
+        float paddingH = gridLayout.padding.left + gridLayout.padding.right;
+        float paddingV = gridLayout.padding.top + gridLayout.padding.bottom;
+        float spacingH = gridLayout.spacing.x * (cols - 1);
+        float spacingV = gridLayout.spacing.y * (rows - 1);
+
+        float availableWidth  = boardRT.rect.width  - paddingH - spacingH;
+        float availableHeight = boardRT.rect.height - paddingV - spacingV;
+
+        float cellWidth  = availableWidth / cols;
+        float cellHeight = availableHeight / rows;
+
+        if (cellHeight / CARD_ASPECT_RATIO < cellWidth)
+            cellWidth = cellHeight / CARD_ASPECT_RATIO;
+        else
+            cellHeight = cellWidth * CARD_ASPECT_RATIO;
+
+        gridLayout.cellSize = new Vector2(cellWidth, cellHeight);
+
+        totalPairs = (r * c) / 2;
+        matchesFound = 0;
+        totalTurns = 0;
+        score = 0;
+        UpdateUI();
     }
-
-    LayoutRebuilder.ForceRebuildLayoutImmediate(boardRT);
-
-    // MAXIMUM card size using the full board area
-    float paddingH = gridLayout.padding.left + gridLayout.padding.right;
-    float paddingV = gridLayout.padding.top + gridLayout.padding.bottom;
-    float spacingH = gridLayout.spacing.x * (cols - 1);
-    float spacingV = gridLayout.spacing.y * (rows - 1);
-
-    float availableWidth  = boardRT.rect.width  - paddingH - spacingH;
-    float availableHeight = boardRT.rect.height - paddingV - spacingV;
-
-    float cellWidth  = availableWidth  / cols;
-    float cellHeight = availableHeight / rows;
-
-    // Keep real card shape (1.4) while making them as big as possible
-    if (cellHeight / CARD_ASPECT_RATIO < cellWidth)
-        cellWidth = cellHeight / CARD_ASPECT_RATIO;
-    else
-        cellHeight = cellWidth * CARD_ASPECT_RATIO;
-
-    gridLayout.cellSize = new Vector2(cellWidth, cellHeight);
-
-    totalPairs = (r * c) / 2;
-    matchesFound = 0;
-    totalTurns = 0;
-    score = 0;
-    UpdateUI();
-}
 
     private void ClearBoard()
     {
@@ -163,7 +204,7 @@ public class GameManager : MonoBehaviour
 
     private void OnCardClicked(Card card)
     {
-        if (card.IsFlipped() || card.IsMatched()) return;
+        if (isPaused || card.IsFlipped() || card.IsMatched()) return;
 
         card.Flip(true);
         flippedCards.Add(card);
