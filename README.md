@@ -1,2 +1,2 @@
 # nebula-echo
-Functional prototype built in Unity 2021 LTS as part of a technical assessment
+Functional prototype built in Unity as part of a technical assessment
