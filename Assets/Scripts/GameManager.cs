@@ -3,7 +3,7 @@ using UnityEngine.UI;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using TMPro;                     // ← Added for TextMeshPro
+using TMPro;
 
 public class GameManager : MonoBehaviour
 {
@@ -11,18 +11,27 @@ public class GameManager : MonoBehaviour
     public GameObject cardPrefab;
     public Transform boardParent;
     public GridLayoutGroup gridLayout;
-    public TextMeshProUGUI scoreText;        // ← CHANGED to TMP (better quality)
+    
+    public TextMeshProUGUI txtScore;
+    public TextMeshProUGUI txtMatches;
+    public TextMeshProUGUI txtTurns;
 
     private List<Card> cards = new List<Card>();
     private List<Card> flippedCards = new List<Card>();
+
     private int rows = 4, cols = 4;
+    
+    private int matchesFound = 0;
+    private int totalTurns = 0;
     private int score = 0;
-    private int combo = 0;
+    private int totalPairs;
 
     private AudioSource audioSource;
     public AudioClip flipSound, matchSound, mismatchSound, gameOverSound;
 
     private const string SAVE_KEY = "CardMatchSave";
+    
+    private const float CARD_ASPECT_RATIO = 1.4f;   // real playing-card shape
 
     private void Awake()
     {
@@ -37,7 +46,7 @@ public class GameManager : MonoBehaviour
         {
             GenerateBoard(4, 4);
         }
-        UpdateScoreUI();
+        UpdateUI();
     }
 
     private void OnApplicationQuit()
@@ -45,35 +54,74 @@ public class GameManager : MonoBehaviour
         SaveProgress();
     }
 
+    // ====================================================================
+    // UPDATED: Cards now fill almost the ENTIRE SCREEN with equal spacing
+    // ====================================================================
     public void GenerateBoard(int r, int c)
+{
+    rows = r;
+    cols = c;
+    ClearBoard();
+
+    // Force board to use 100% of the screen
+    RectTransform boardRT = boardParent.GetComponent<RectTransform>();
+    boardRT.anchorMin = Vector2.zero;
+    boardRT.anchorMax = Vector2.one;
+    boardRT.anchoredPosition = Vector2.zero;
+    boardRT.sizeDelta = Vector2.zero;
+
+    // Minimal padding/spacing so cards are HUGE
+    gridLayout.padding = new RectOffset(10, 10, 95, 15);  // top padding only for your Score bar
+    gridLayout.spacing = new Vector2(6, 6);
+    gridLayout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+    gridLayout.constraintCount = c;
+
+    // Create the cards
+    List<int> ids = Enumerable.Range(0, (r * c) / 2).ToList();
+    ids.AddRange(ids);
+    ids = ids.OrderBy(x => Random.value).ToList();
+
+    for (int i = 0; i < r * c; i++)
     {
-        rows = r;
-        cols = c;
-        ClearBoard();
+        GameObject go = Instantiate(cardPrefab, boardParent);
+        Card card = go.GetComponent<Card>();
+        card.id = ids[i];
+        card.frontSprite = GetSpriteForId(card.id);
+        card.backSprite = GetBackSprite();
+        cards.Add(card);
 
-        List<int> ids = Enumerable.Range(0, (r * c) / 2).ToList();
-        ids.AddRange(ids);
-        ids = ids.OrderBy(x => Random.value).ToList();
-
-        gridLayout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
-        gridLayout.constraintCount = c;
-
-        for (int i = 0; i < r * c; i++)
-        {
-            GameObject go = Instantiate(cardPrefab, boardParent);
-            Card card = go.GetComponent<Card>();
-            card.id = ids[i];
-            card.frontSprite = GetSpriteForId(card.id);
-            card.backSprite = GetBackSprite();
-            cards.Add(card);
-
-            Button btn = go.GetComponent<Button>();
-            btn.onClick.AddListener(() => OnCardClicked(card));
-        }
-
-        float cellSize = Mathf.Min(Screen.width / c * 0.85f, Screen.height / r * 0.85f);
-        gridLayout.cellSize = new Vector2(cellSize, cellSize);
+        Button btn = go.GetComponent<Button>();
+        btn.onClick.AddListener(() => OnCardClicked(card));
     }
+
+    LayoutRebuilder.ForceRebuildLayoutImmediate(boardRT);
+
+    // MAXIMUM card size using the full board area
+    float paddingH = gridLayout.padding.left + gridLayout.padding.right;
+    float paddingV = gridLayout.padding.top + gridLayout.padding.bottom;
+    float spacingH = gridLayout.spacing.x * (cols - 1);
+    float spacingV = gridLayout.spacing.y * (rows - 1);
+
+    float availableWidth  = boardRT.rect.width  - paddingH - spacingH;
+    float availableHeight = boardRT.rect.height - paddingV - spacingV;
+
+    float cellWidth  = availableWidth  / cols;
+    float cellHeight = availableHeight / rows;
+
+    // Keep real card shape (1.4) while making them as big as possible
+    if (cellHeight / CARD_ASPECT_RATIO < cellWidth)
+        cellWidth = cellHeight / CARD_ASPECT_RATIO;
+    else
+        cellHeight = cellWidth * CARD_ASPECT_RATIO;
+
+    gridLayout.cellSize = new Vector2(cellWidth, cellHeight);
+
+    totalPairs = (r * c) / 2;
+    matchesFound = 0;
+    totalTurns = 0;
+    score = 0;
+    UpdateUI();
+}
 
     private void ClearBoard()
     {
@@ -85,87 +133,99 @@ public class GameManager : MonoBehaviour
 
     private Sprite GetSpriteForId(int id)
     {
-        Texture2D tex = new Texture2D(128, 128);
+        int texWidth = 128;
+        int texHeight = Mathf.RoundToInt(128 * CARD_ASPECT_RATIO);
+
+        Texture2D tex = new Texture2D(texWidth, texHeight);
         Color color = new Color((id % 5) * 0.2f + 0.3f, (id % 3) * 0.3f + 0.3f, (id % 7) * 0.15f + 0.4f);
-        for (int x = 0; x < 128; x++)
-            for (int y = 0; y < 128; y++)
+        
+        for (int x = 0; x < texWidth; x++)
+            for (int y = 0; y < texHeight; y++)
                 tex.SetPixel(x, y, color);
+        
         tex.Apply();
-        return Sprite.Create(tex, new Rect(0, 0, 128, 128), new Vector2(0.5f, 0.5f));
+        return Sprite.Create(tex, new Rect(0, 0, texWidth, texHeight), new Vector2(0.5f, 0.5f));
     }
 
     private Sprite GetBackSprite()
     {
-        Texture2D tex = new Texture2D(128, 128);
-        for (int x = 0; x < 128; x++)
-            for (int y = 0; y < 128; y++)
+        int texWidth = 128;
+        int texHeight = Mathf.RoundToInt(128 * CARD_ASPECT_RATIO);
+
+        Texture2D tex = new Texture2D(texWidth, texHeight);
+        for (int x = 0; x < texWidth; x++)
+            for (int y = 0; y < texHeight; y++)
                 tex.SetPixel(x, y, new Color(0.1f, 0.1f, 0.2f));
+        
         tex.Apply();
-        return Sprite.Create(tex, new Rect(0, 0, 128, 128), new Vector2(0.5f, 0.5f));
+        return Sprite.Create(tex, new Rect(0, 0, texWidth, texHeight), new Vector2(0.5f, 0.5f));
     }
 
     private void OnCardClicked(Card card)
     {
-        if (card.IsFlipped() || card.IsMatched() || flippedCards.Count >= 2) return;
+        if (card.IsFlipped() || card.IsMatched()) return;
 
         card.Flip(true);
         flippedCards.Add(card);
         PlaySound("flip");
 
         if (flippedCards.Count == 2)
-            StartCoroutine(CheckMatch());
+        {
+            Card c1 = flippedCards[0];
+            Card c2 = flippedCards[1];
+            flippedCards.Clear();
+            StartCoroutine(CheckMatch(c1, c2));
+        }
     }
 
-    private IEnumerator CheckMatch()
+    private IEnumerator CheckMatch(Card c1, Card c2)
     {
         yield return new WaitForSeconds(0.3f);
 
-        Card c1 = flippedCards[0];
-        Card c2 = flippedCards[1];
+        totalTurns++;
 
         if (c1.id == c2.id)
         {
             c1.SetMatched();
             c2.SetMatched();
-            score += 100 + (combo * 50);
-            combo++;
+            matchesFound++;
             PlaySound("match");
-            UpdateScoreUI();
-            SaveProgress();
 
-            if (IsGameWon())
+            if (matchesFound == totalPairs)
             {
                 PlaySound("gameover");
-                Debug.Log("🎉 Game Won! Final Score: " + score);
+                Debug.Log($"🎉 Game Won! Matches: {matchesFound} | Turns: {totalTurns} | Score: {score}");
             }
         }
         else
         {
             c1.Flip(false);
             c2.Flip(false);
-            combo = 0;
             PlaySound("mismatch");
         }
 
-        flippedCards.Clear();
+        score = (matchesFound * 200) - (totalTurns * 10);
+        if (score < 0) score = 0;
+
+        UpdateUI();
+        SaveProgress();
     }
 
-    private bool IsGameWon() => cards.TrueForAll(c => c.IsMatched());
-
-    private void UpdateScoreUI()
+    private void UpdateUI()
     {
-        if (scoreText != null)
-            scoreText.text = $"Score: {score} | Combo: {combo}";
+        if (txtScore != null)   txtScore.text   = $"Score: {score}";
+        if (txtMatches != null) txtMatches.text = $"Matches: {matchesFound}/{totalPairs}";
+        if (txtTurns != null)   txtTurns.text   = $"Turns: {totalTurns}";
     }
 
     private void PlaySound(string type)
     {
         AudioClip clip = type switch
         {
-            "flip" => flipSound,
-            "match" => matchSound,
-            "mismatch" => mismatchSound,
-            "gameover" => gameOverSound,
+            "flip"      => flipSound,
+            "match"     => matchSound,
+            "mismatch"  => mismatchSound,
+            "gameover"  => gameOverSound,
             _ => null
         };
 
@@ -178,12 +238,20 @@ public class GameManager : MonoBehaviour
     {
         public int rows, cols;
         public int score;
-        public int combo;
+        public int matchesFound;
+        public int totalTurns;
     }
 
     public void SaveProgress()
     {
-        GameSave save = new GameSave { rows = rows, cols = cols, score = score, combo = combo };
+        GameSave save = new GameSave
+        {
+            rows = rows,
+            cols = cols,
+            score = score,
+            matchesFound = matchesFound,
+            totalTurns = totalTurns
+        };
         PlayerPrefs.SetString(SAVE_KEY, JsonUtility.ToJson(save));
         PlayerPrefs.Save();
     }
@@ -194,7 +262,8 @@ public class GameManager : MonoBehaviour
 
         GameSave save = JsonUtility.FromJson<GameSave>(PlayerPrefs.GetString(SAVE_KEY));
         score = save.score;
-        combo = save.combo;
+        matchesFound = save.matchesFound;
+        totalTurns = save.totalTurns;
         GenerateBoard(save.rows, save.cols);
     }
 }
