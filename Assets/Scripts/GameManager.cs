@@ -4,7 +4,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using TMPro;
-using UnityEngine.Serialization;
 using UnityEngine.InputSystem;
 
 public class GameManager : MonoBehaviour
@@ -21,15 +20,15 @@ public class GameManager : MonoBehaviour
     public GameObject pauseMenu;
     public Button btnResume;
     public Button btnRestart;
-    [FormerlySerializedAs("btn3x3")] public Button btn3x4;
+    public Button btn3x4;
     public Button btn4x4;
-    [FormerlySerializedAs("btn5x5")] public Button btn5x6;
+    public Button btn5x6;
+    public Button btnQuit;
 
     private List<Card> cards = new List<Card>();
     private List<Card> flippedCards = new List<Card>();
 
     private int rows = 4, cols = 4;
-    
     private int matchesFound = 0;
     private int totalTurns = 0;
     private int score = 0;
@@ -41,38 +40,32 @@ public class GameManager : MonoBehaviour
     public AudioClip flipSound, matchSound, mismatchSound, gameOverSound;
 
     private const string SAVE_KEY = "CardMatchSave";
-    
     private const float CARD_ASPECT_RATIO = 1.4f;
 
     private void Awake()
     {
-        audioSource = GetComponent<AudioSource>();
-        if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+        audioSource = GetComponent<AudioSource>() ?? gameObject.AddComponent<AudioSource>();
         
-        if (btnResume)   btnResume.onClick.AddListener(ResumeGame);
-        if (btnRestart)  btnRestart.onClick.AddListener(() => NewGame(rows, cols));
-        if (btn3x4)      btn3x4.onClick.AddListener(() => NewGame(3, 4));
-        if (btn4x4)      btn4x4.onClick.AddListener(() => NewGame(4, 4));
-        if (btn5x6)      btn5x6.onClick.AddListener(() => NewGame(5, 6));
+        if (btnResume)  btnResume.onClick.AddListener(ResumeGame);
+        if (btnRestart) btnRestart.onClick.AddListener(() => NewGame(rows, cols));
+        if (btn3x4)     btn3x4.onClick.AddListener(() => NewGame(3, 4));
+        if (btn4x4)     btn4x4.onClick.AddListener(() => NewGame(4, 4));
+        if (btn5x6)     btn5x6.onClick.AddListener(() => NewGame(5, 6));
+        if (btnQuit)    btnQuit.onClick.AddListener(QuitGame);
     }
 
     private void Start()
     {
         if (pauseMenu) pauseMenu.SetActive(false);
         LoadProgress();
-        if (cards.Count == 0)
-        {
-            NewGame(4, 4);
-        }
+        if (cards.Count == 0) NewGame(4, 4);
         UpdateUI();
     }
 
     private void Update()
     {
         if (Keyboard.current.escapeKey.wasPressedThisFrame)
-        {
             TogglePause();
-        }
     }
 
     public void TogglePause()
@@ -85,6 +78,15 @@ public class GameManager : MonoBehaviour
     {
         isPaused = false;
         if (pauseMenu) pauseMenu.SetActive(false);
+    }
+
+    private void QuitGame()
+    {
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
     }
 
     public void NewGame(int r, int c)
@@ -103,16 +105,13 @@ public class GameManager : MonoBehaviour
         ClearBoard();
 
         RectTransform boardRT = boardParent.GetComponent<RectTransform>();
-        
-        boardRT.anchorMin = new Vector2(0.20f, 0f);
+        boardRT.anchorMin = new Vector2(0.28f, 0f);
         boardRT.anchorMax = Vector2.one;
         boardRT.anchoredPosition = Vector2.zero;
         boardRT.sizeDelta = Vector2.zero;
-        
-        gridLayout.padding = new RectOffset(20, 20, 50, 50);
-        
-        gridLayout.childAlignment = TextAnchor.MiddleCenter;
 
+        gridLayout.padding = new RectOffset(20, 20, 95, 20);
+        gridLayout.childAlignment = TextAnchor.MiddleCenter;
         gridLayout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
         gridLayout.constraintCount = c;
         
@@ -136,7 +135,7 @@ public class GameManager : MonoBehaviour
             Button btn = go.GetComponent<Button>();
             btn.onClick.AddListener(() => OnCardClicked(card));
         }
-        
+
         LayoutRebuilder.ForceRebuildLayoutImmediate(boardRT);
         
         float paddingH = gridLayout.padding.left + gridLayout.padding.right;
